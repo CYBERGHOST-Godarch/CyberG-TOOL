@@ -6,7 +6,7 @@ to run this tool you need to paste this tool in termux directory for that first 
 (2) apt update -y
 (3) apt upgrade -y 
 (4) pkg install git 
-(5) git clone 
+(5) git clone https://github.com/CYBERGHOST-Godarch/CyberG-TOOL.git
 (6) cd CyberG
 (7) bash setup
 then paste the patch file into download/ cyberv2 patch file then select options in termux and it will unpack it 
