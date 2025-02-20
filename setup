@@ -1,0 +1,310 @@
+#!/bin/bash
+# Installer for CyberG
+
+source etc/banner
+# Banner Add
+echo -e "executing: ${LIGHTGREEN}SETUP${NOCOLOR}"
+echo "-----------------------"
+# Setup directory for Requirements
+quickbms_dir=$PREFIX/share/quickbms
+
+function redirect {
+ echo -e "${LIGHTGREEN}STARTING CyberG${NOCOLOR}"
+ echo -ne '#####                     (33%)\r'
+ sleep 1
+ echo -ne '#############             (66%)\r'
+ sleep 1
+ echo -ne '#######################   (99.9%)\r'
+ echo -ne '\n'
+bash CyberG
+}
+
+function quickbms_check {
+  echo -e "${YELLOW}Checking required program..${NOCOLOR}"
+  FILE=$quickbms_dir/quickbms
+  if [ -f "$FILE" ]; then
+      echo -e "${LIGHTGREEN}Program has been installed.${NOCOLOR}"
+      redirect
+  else 
+      echo -e "${RED}PROGRAM NOT FOUND.${NOCOLOR}"
+      quickbms_install
+      redirect
+  fi
+}
+
+function quickbms_install {
+  echo -e "${LIGHTGREEN}Installing required program..${NOCOLOR}"
+  wget -q http://aluigi.altervista.org/papers/quickbms_linux.zip
+  sleep 1
+  unzip -qq quickbms_linux.zip
+  sleep 1
+  mkdir $PREFIX/share/quickbms
+  sleep 1
+  chmod +x quickbms_4gb_files
+  sleep 1
+  yes | cp -rf quickbms_4gb_files $quickbms_dir/quickbms
+  sleep 1
+  chmod +x etc/tools.bms CyberG
+  sleep 1
+  rm -rf quickbms*
+  rm setup
+  mkdir output
+}
+
+#make dir
+mkdir /sdcard/Download/CyberG
+mkdir /sdcard/Download/CyberG/chunk
+
+if [[ -f "$merpro" ]]
+then
+cp -rf $merpro $locbin
+chmod +x $locbin/CyberG
+DIR="$EXTERNAL_STORAGE/Download/CyberG/"
+
+# Check if the directory exists
+if [ -d "$DIR" ]; then
+    rm -r "$DIR"
+    echo ""
+else
+    echo ""
+fi
+CyberG
+else
+echo "No CyberG file in Download directory"
+echo "File Past The Download Folder"
+fi
+
+#Checking Required Pakcages
+echo -e "${YELLOW}Checking Required packages${NOCOLOR}"
+
+packages=("wget" "unzip" "curl" "rsync" "x11-repo" "qemu-system-i386" "qemu-user-i386")
+
+for pkg in ${packages[@]}; do
+
+    is_pkg_installed=$(dpkg-query -W --showformat='${Status}\n' ${pkg} | grep "install ok installed")
+
+    if [ "${is_pkg_installed}" == "install ok installed" ]; then
+        echo -e ${GREEN}${pkg}${NOCOLOR} is installed.
+    else [ "" = "${is_pkg_installed}" ];
+     echo -e "${RED}No ${pkg}. Setting up ${pkg}.${NOCOLOR}" 
+    pkg install ${pkg} -y
+    fi
+done
+quickbms_check
+# Define the paths for input and output directories
+PATCH_DIR="$EXTERNAL_STORAGE/Download/cyberV2/patch_files"
+UNPACK_CHUNK_DIR="$EXTERNAL_STORAGE/Download/cyberV2/unpack_chunk"
+UNPACK_DIR="$EXTERNAL_STORAGE/Download/cyberV2/unpack"
+REPACK_DIR="$EXTERNAL_STORAGE/Download/cyberV2/repack"
+
+# Ensure the all needed directory exists, create if it doesn't
+if [[ -d "$PATCH_DIR" && -d "$UNPACK_DIR" && -d "REPACK_DIR" && -d "UNPACK_CHUNK_DIR" ]]; then
+	echo ""
+else
+	echo ""
+	mkdir -p "$PATCH_DIR"
+	mkdir -p "$UNPACK_DIR"
+	mkdir -p "$REPACK_DIR"
+	mkdir -p "$UNPACK_CHUNK_DIR"
+fi
+
+menu_options=(
+	"Unpacking PAK（Large memory）"
+    "Unpacking PAK（64kb）"
+    "PackPAK（64kb）"
+    "quit"
+)
+
+print_menu() {
+    local i=1
+    for option in "${menu_options[@]}"; do
+        printf "%s) " "$i"
+        rainbow "$option"
+        i=$((i + 1))
+    done
+}
+
+function unpack_chunk() {
+    # Create a temporary directory to store the decoded binaries
+    TEMP_DIR=$(mktemp -d)
+    PAKTOOL_BIN="$TEMP_DIR/paktool"
+    FILEXOR_BIN="$TEMP_DIR/filexor"
+
+    # Decode the paktool binary from the Base64 environment variable and save it to the temporary location
+    echo "$BASE64_UNPACK_PAKTOOL" | base64 -d > "$PAKTOOL_BIN"
+
+    # Decode the filexor binary from the Base64 environment variable and save it to the temporary location
+    echo "$BASE64_FILEXOR" | base64 -d > "$FILEXOR_BIN"
+
+    # Make both binaries executable
+    chmod +x "$PAKTOOL_BIN" "$FILEXOR_BIN"
+
+    # Check if there are any .pak files in the patch directory
+    pak_files=("$PATCH_DIR"/game_patch_*.pak)
+    if [ ${#pak_files[@]} -eq 0 ]; then
+        echo -e "${RED}No .pak files found in $PATCH_DIR"
+        sleep 2
+        exit 1
+    fi
+
+    # Display the available .pak files to the user and allow them to select one
+    echo "Available .pak files:"
+    select pak_file in "${pak_files[@]}"; do
+        if [ -n "$pak_file" ]; then
+            # Extract the base name of the selected .pak file (without the directory or extension)
+            base_name=$(basename "$pak_file" .pak)
+
+            # Create a subdirectory in the output folder named after the .pak file
+            destination_unpack="$UNPACK_CHUNK_DIR/$base_name"
+
+            # Create the output directory if it doesn't exist
+            mkdir -p "$destination_unpack"
+
+            # Set the output file name for the XORed pak file
+            xored_pak_file="$TEMP_DIR/${base_name}.outb"
+
+            # XOR the pak file using the embedded filexor binary
+            "$FILEXOR_BIN" "$pak_file" "$xored_pak_file" 0x79
+
+            # Run the embedded paktool to unpack the XORed pak file into its respective folder
+            "$PAKTOOL_BIN" -a -c 65536 "$xored_pak_file" "$destination_unpack"
+
+            echo "Unpacking successful!"
+            break
+        else
+            echo "Invalid option，Please reselect."
+        fi
+    done
+
+    # Clean up: remove the temporary directory and binary after usage
+    rm -rf "$TEMP_DIR"
+    clear
+}
+
+function unpack_non_chunk() {
+    # Create a temporary directory to store the decoded paktool binary
+    TEMP_DIR=$(mktemp -d)
+    PAKTOOL_BIN="$TEMP_DIR/paktool"
+
+    # Decode the paktool binary from the Base64 environment variable and save it to the temporary location
+    echo "$NONCHUNK_TOOL" | base64 -d > "$PAKTOOL_BIN"
+
+    # Make the binary executable
+    chmod +x "$PAKTOOL_BIN"
+
+    # Check if there are any .pak files in the patch directory
+    pak_files=("$PATCH_DIR"/game_patch_*.pak)
+    if [ ${#pak_files[@]} -eq 0 ]; then
+        echo -e "${RED}No .pak files found in $PATCH_DIR"
+        sleep 2
+        exit 1
+    fi
+
+    # Display the available .pak files to the user and allow them to select one
+    echo "Available .pak files:"
+    select pak_file in "${pak_files[@]}"; do
+        if [ -n "$pak_file" ]; then
+            # Extract the base name of the selected .pak file (without the directory or extension)
+            base_name=$(basename "$pak_file" .pak)
+
+            # Create a subdirectory in the output folder named after the .pak file
+            destination_unpack="$UNPACK_DIR/$base_name"
+            destination_repack="$REPACK_DIR/$base_name"
+
+            # Create the output directories if they don't exist
+            mkdir -p "$destination_unpack"
+            mkdir -p "$destination_repack"
+
+            echo "Unpacking $pak_file into $destination_unpack..."
+
+            # Run the embedded paktool to unpack the selected file into its respective folder
+            "$PAKTOOL_BIN" -a "$pak_file" "$destination_unpack"
+
+            echo "Unpacking successful!"
+            break
+        else
+            echo "Invalid option，Please reselect."
+        fi
+    done
+
+    # Clean up: remove the temporary directory and binary after usage
+    rm -rf "$TEMP_DIR"
+    clear
+    rainbow "Unpacking successful!"
+}
+
+function repack_non_chunk() {
+    # Create a temporary directory to store the decoded paktool binary
+    TEMP_DIR=$(mktemp -d)
+    PAKTOOL_BIN="$TEMP_DIR/paktool"
+
+    # Decode the paktool binary from the Base64 environment variable and save it to the temporary location
+    echo "$NONCHUNK_TOOL" | base64 -d > "$PAKTOOL_BIN"
+
+    # Make the binary executable
+    chmod +x "$PAKTOOL_BIN"
+
+    # Check if there are any game_patch_* folders in the repack directory
+    game_patch_folders=("$REPACK_DIR"/game_patch_*)
+    if [ ${#game_patch_folders[@]} -eq 0 ]; then
+        echo -e "${RED}No game_patch folders found in $REPACK_DIR"
+        sleep 2
+        exit 1
+    fi
+
+    # Display the available game_patch_* folders to the user and allow them to select one
+    echo "Available game_patch folders:"
+    select game_patch_folder in "${game_patch_folders[@]}"; do
+        if [ -n "$game_patch_folder" ]; then
+            # Extract the base name of the selected folder
+            base_name=$(basename "$game_patch_folder")
+
+            # Define the output game_patch file in the patch_file directory
+            output_file="$PATCH_DIR/$base_name.pak"
+
+            echo "Repacking $game_patch_folder into $output_file..."
+
+            # Run the external program to repack the folder into a .pak file
+            "$PAKTOOL_BIN" -a -r "$output_file" "$game_patch_folder"
+
+            echo "Packing is complete!"
+            break
+        else
+            echo "Invalid option，Please reselect."
+        fi
+    done
+
+    # Clean up: remove the temporary directory and binary after usage
+    rm -rf "$TEMP_DIR"
+    clear
+    rainbow "Packing is complete!"
+}
+
+function main() {
+	PS3='Select option: '
+	# Main loop
+	while true; do
+		print_menu
+		read -p "Please enter your options: " choice
+		case $choice in
+			1)
+				unpack_chunk
+				;;
+			2)
+				unpack_non_chunk
+				;;
+			3)
+				repack_non_chunk
+				;;
+			4)
+				clear
+				exit 0
+				;;
+			*)
+				echo "Invalid option $choice"
+				;;
+		esac
+	done
+}
+
+mai
